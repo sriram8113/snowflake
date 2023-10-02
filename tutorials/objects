@@ -1,0 +1,141 @@
+MY_DB_OBJECTS.MY_SCHEMA_OBJECTS.MY_STGuse role ACCOUNTADMIN;
+create or replace database my_db_objects comment  = 'Database for sequence objects';
+create schema my_schema_objects comment = 'Schema for objects';
+use database my_db_objects;
+use schema my_schema_objects;
+
+show schemas;
+show databases;
+select current_database(), current_schema(), current_role();
+
+create or replace sequence seq_01 start =1 increment = 1 comment = 'This is a trail seqeunce';
+create or replace sequence seq_02 start =1 increment = 2 comment = 'This is a trail seqeunce';
+create or replace sequence seq_03 start =0 increment = -2 comment = 'This is a trail sequence with negative increment';
+
+create or replace table my_tbl_01(i integer);
+
+select seq_01.nextval, seq_02.nextval, seq_03.nextval;
+
+create or replace table my_tbl_02(
+        pk int autoincrement,
+        seq1 int default seq_01.nextval,
+        seq2 int default seq_02.nextval,
+        seq3 int default seq_03.nextval,
+        msg string
+);
+
+desc table my_tbl_02;
+select get_ddl('table', 'my_tbl_02');
+
+insert into my_tbl_02(msg) values ('msg-1');
+select * from my_tbl_02;
+
+show sequences;
+select get_ddl('sequence', 'seq_03');
+
+// ===============================================
+
+//loading data from different format 
+
+create table customer_csv(
+        CUSTOMER_KEY integer,
+        Name string,
+        ADDRESS string,
+        COUNTRY_KEY string,
+        PHONE string,
+        ACCT_BAL string,
+        MKT_SEGMENT string,
+        COMMENT string
+);
+
+
+// loading parquet data 
+
+create table customer_par(
+        my_data variant
+);
+
+select * from customer_par;
+
+// for querying the individul datasets
+select c.key,c.value. from customer_par,
+lateral flatten(input => my_data) c;
+
+
+// similary for orc data type as well 
+
+show file formats;
+//Actually in a latest snowsight version we cannot create file formats
+
+//==============================================
+//stage objects 
+
+list @my_stg;
+
+select count(*) from customer_csv;
+copy into customer_csv
+    from @my_stg/second.csv
+     FILE_FORMAT = (
+                TYPE = CSV
+                SKIP_HEADER = 1  -- If the first line is a header
+                FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+                RECORD_DELIMITER = '\n'  -- Assuming newline character separates records
+);
+
+select count(*) from customer_csv;
+
+//========================================================
+//integration object 
+USE role accountadmin;
+
+CREATE OR REPLACE STORAGE INTEGRATION my_s3_integration
+    TYPE = EXTERNAL_STAGE
+    STORAGE_PROVIDER = S3
+    ENABLED = TRUE
+    STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::641308323364:role/ACCOUNTADMIN'
+    STORAGE_ALLOWED_LOCATIONS = ('s3://mybucket/path1/','s3://mybucket2/path2');
+
+show integrations;
+
+//CREATE OR REPLACE STORAGE INTEGRATION my_azure_integration
+//    TYPE = EXTERNAL_STAGE
+//    STORAGE_PROVIDER = AZURE
+//    ENABLED = TRUE
+//    STORAGE_AZURE_TENANT_ID = 'YOUR_AZURE_TENANT_ID'
+//    STORAGE_AZURE_CLIENT_ID = 'YOUR_AZURE_CLIENT_ID'
+//    STORAGE_AZURE_CLIENT_SECRET = 'YOUR_AZURE_CLIENT_SECRET'
+//    STORAGE_AZURE_CONTAINER_NAME = 'YOUR_CONTAINER_NAME'
+//    STORAGE_ALLOWED_LOCATIONS = ('s3://mybucket/path1/','s3://mybucket2/path2');
+
+//==========================================================
+// pipe object 
+
+show pipes;
+
+select get_ddl('pipe', 'MY_PIPE');
+
+select SYSTEM$PIPE_STATUS('my_pipe');
+
+//===========================================================
+
+//stream objects 
+
+show streams;
+
+select * from customer_csv order by customer_key limit 10;
+select * from customer_stream;
+
+delete from customer_csv where customer_key = 60001;
+select * from customer_stream;
+
+select get_ddl('stream', 'customer_stream');
+//so we can see whathappened to the tbale by using operstions insert update or delete 
+
+
+//============================================================
+// task objects 
+
+
+
+
+
