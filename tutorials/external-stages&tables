@@ -1,0 +1,305 @@
+use role accountadmin;
+use database tipsdb;
+use schema tips_schema;
+use warehouse compute_wh;
+
+-- Create a storage integration for AWS
+CREATE or replace storage integration my_aws_integration
+  TYPE = EXTERNAL_STAGE
+  ENABLED = TRUE
+  STORAGE_PROVIDER = S3
+  STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::641308323364:role/my_first'
+  STORAGE_ALLOWED_LOCATIONS = ('s3://sriram-snowflake-s3-external-stage/customer/csv/')
+  COMMENT="This is aws integration";
+
+
+desc integration my_aws_integration;
+
+--using the storage integration we need to create stage 
+create or replace stage s3_customer_csv
+    url = 's3://sriram-snowflake-s3-external-stage/customer/csv/'
+    storage_integration = my_aws_integration
+    comment = 'this is customer csv data';
+
+desc stage s3_customer_csv;
+
+list @s3_customer_csv;
+
+create or replace file format csv_fileformat 
+        type = 'csv' 
+        compression = 'auto' 
+        field_delimiter = ',' 
+        record_delimiter = '\n' 
+        skip_header = 0 
+        field_optionally_enclosed_by = '\042' 
+        null_if = ('\\N');
+
+
+-- quering external stage without creating any table
+--this can be done using $ notation
+
+
+-- select external stage using $ notation
+select t.$1, t.$2, t.$3,t.$4, t.$5, t.$6 , t.$7, t.$8 
+from @s3_customer_csv (file_format => 'csv_fileformat') t; 
+
+--if there are only 8 columns and if u give $9 then a column will be created with null values.
+
+ -- what if you give one. extra colum in your $ notation
+select t.$1, t.$2, t.$3,t.$4, t.$5, t.$6 , t.$7, t.$8, t.$9 
+from @s3_customer_csv (file_format => 'csv_ff') t; 
+
+// it will appear null, so be careful with such column.
+
+
+--now creating external table using the external stage 
+
+create or replace external TABLE customer_csv_et (
+        CUST_KEY varchar AS (value:c1::varchar),
+        NAME varchar AS (value:c2::varchar),
+        ADDRESS varchar AS (value:c3::varchar),
+        NATION_KEY varchar AS (value:c4::varchar),
+        PHONE varchar AS (value:c5::varchar),
+        ACCOUNT_BALANCE varchar AS (value:c6::varchar),
+        MARKET_SEGMENT varchar AS (value:c7::varchar),
+        COMMENT varchar AS (value:c8::varchar)
+    )
+with location=@s3_customer_csv
+auto_refresh = false
+file_format = (format_name = csv_ff)
+;
+
+select * from customer_csv_et;
+
+--getting value column created by s3 and metadata column
+select value, metadata$filename from customer_csv_et;
+
+--even we can use conditions to get data from a specific file
+select value, metadata$filename from customer_csv_et where metadata$filename = 'customer/csv/second.csv';
+
+-- if you are not sure about the column names etc, then you can simply add a dummy column and check all values
+
+create or replace external TABLE customer_csv_et_dummy (
+      col1 varchar AS (value:c1::varchar)
+    )
+    with location=@s3_customer_csv
+    auto_refresh = false
+    file_format = (format_name = csv_ff);
+
+select * from customer_csv_et_dummy;
+
+
+--describing the external table
+desc external table customer_csv_et type = 'column';
+desc external table customer_csv_et type = 'stage';
+
+
+//=========================================================================================================
+
+--Till now we have seen for csv files now we will see for parquet
+
+
+
+
+-- stage with parquet as file format
+create or replace stage s3_etg_customer_parquet_ff 
+    url = 's3://my-s3-data-lake/customer/parquet/' 
+    file_format = (type='parquet' compression='snappy')
+    comment = 'this customer parquet data stage with file format attacched with it';
+    
+    
+-- s3 external stage without any file format attached with it
+create stage s3_etg_customer_parquet 
+    url = 's3://my-s3-data-lake/customer/parquet/' 
+    comment = 'this customer parquet data';  
+
+
+
+    -- lets create external stage in s3
+    drop stage s3_customer_parquet;
+    create stage s3_customer_parquet 
+        url = 's3://my-s3-data-lake/customer/parquet/' 
+        comment = 'this customer parquet data';
+
+    list @s3_customer_parquet;
+
+    desc stage s3_customer_parquet;
+
+
+
+    -- following will give only json value
+    -- you can see the column header is $1
+    select * from  @s3_etg_customer_parquet_ff;
+    
+    -- get all the file names
+    select metadata$filename from @s3_etg_customer_parquet_ff;
+    
+    -- value will not work in this approachc
+    select value,metadata$filename from @s3_etg_customer_parquet_ff;
+    
+    select $1:CUSTOMER_KEY from @s3_etg_customer_parquet_ff;
+    
+    -- case sensitive 
+    select $1:customer_key from @s3_etg_customer_parquet_ff;
+    
+    -- any other field which does not exist
+    select $1:unknow_key from @s3_etg_customer_parquet_ff;
+    
+    select 
+        $1:CUSTOMER_KEY::varchar,
+        $1:NAME::varchar,
+        $1:ADDRESS::varchar,
+        $1:COUNTRY_KEY::varchar,
+        $1:PHONE::varchar,
+        $1:ACCT_BAL::decimal(10,2),
+        $1:MKT_SEGMENT::varchar,
+        $1:COMMENT::varchar
+    from @s3_etg_customer_parquet_ff;
+
+
+    -- following will throw error
+     create or replace external TABLE customer_par_ff (
+        CUST_KEY varchar AS ($1::varchar)
+    )
+    with location=@s3_etg_customer_parquet_ff;
+
+    --error if you put c1 or c2 stuff
+    create or replace external TABLE customer_par_ff (
+        CUST_KEY varchar AS (value:c1::varchar)
+    )
+    with location=@s3_etg_customer_parquet_ff
+    file_format = (format_name = parquet_ff);
+
+    -- following is the correct approach
+    create or replace external TABLE customer_par_ff (
+        CUST_KEY varchar AS ($1:CUSTOMER_KEY::varchar)
+    )
+    with location=@s3_etg_customer_parquet_ff
+    file_format = (format_name = parquet_ff);
+
+    create or replace external TABLE customer_par_ff (
+        CUST_KEY varchar AS ($1:CUSTOMER_KEY::varchar),
+        NAME varchar AS ($1:NAME::varchar),
+        ADDRESS varchar AS ($1:ADDRESS::varchar),
+        NATION_KEY varchar AS ($1:COUNTRY_KEY::varchar),
+        PHONE varchar AS ($1:PHONE::varchar),
+        ACCOUNT_BALANCE varchar AS ($1:ACCT_BAL::varchar),
+        MARKET_SEGMENT varchar AS ($1:MKT_SEGMENT::varchar),
+        COMMENT varchar AS ($1:COMMENT::varchar)
+    )
+    with location=@s3_etg_customer_parquet_ff
+    file_format = (format_name = parquet_ff);
+
+
+//=================================================================================
+--for file format of orc 
+
+
+    -- stage with orc as file format
+    CREATE STAGE s3_stg_customer_orc
+    URL = 's3://my-s3-data-lake/customer/orc/' 
+    file_format = orc_ff
+    COMMENT = 'This customer orc data';
+ 
+       
+    --list the stage files
+    list @s3_stg_customer_orc;
+    
+    --desc the stage 
+    desc stage s3_stg_customer_orc;
+    
+    --select orc external stage
+    select * from @s3_stg_customer_orc;
+    
+    
+    create or replace external TABLE customer_orc (
+        CUST_KEY varchar AS ($1:CUSTOMER_KEY::varchar),
+        NAME varchar AS ($1:NAME::varchar),
+        ADDRESS varchar AS ($1:ADDRESS::varchar),
+        NATION_KEY varchar AS ($1:COUNTRY_KEY::varchar),
+        PHONE varchar AS ($1:PHONE::varchar),
+        ACCOUNT_BALANCE varchar AS ($1:ACCT_BAL::varchar),
+        MARKET_SEGMENT varchar AS ($1:MKT_SEGMENT::varchar),
+        COMMENT varchar AS ($1:COMMENT::varchar)
+        )
+    with location=@s3_stg_customer_orc
+    auto_refresh = false
+    file_format = (format_name = orc_ff)
+    ;
+
+    -- lets select the table
+    select * from customer_orc;
+    
+    create or replace materialized view my_mv_on_et as
+    select  CUST_KEY, name, address, nation_key, phone, account_balance, market_segment, comment from customer_orc;
+    
+     select * from my_mv_on_et;
+//=============================================================================
+
+--error handling
+
+
+-- lets create external stage in s3 with csv format
+create stage s3_customer_error 
+    url = 's3://my-s3-data-lake/customer_with_error/' 
+    comment = 'this customer csv data also having orc and parquet';
+    
+-- desc the stage and validate the definition
+-- and on_error parameters
+desc stage s3_customer_error;
+
+-- lets list the stage to see all the files and path 
+list @s3_customer_error;
+
+
+create or replace external TABLE customer_orc_error (
+     CUST_KEY varchar AS ($1:CUSTOMER_KEY::varchar),
+    NAME varchar AS ($1:NAME::varchar),
+    ADDRESS varchar AS ($1:ADDRESS::varchar),
+    NATION_KEY varchar AS ($1:COUNTRY_KEY::varchar),
+    PHONE varchar AS ($1:PHONE::varchar),
+    ACCOUNT_BALANCE varchar AS ($1:ACCT_BAL::varchar),
+    MARKET_SEGMENT varchar AS ($1:MKT_SEGMENT::varchar),
+    COMMENT varchar AS ($1:COMMENT::varchar)
+  )
+with location=@s3_customer_error
+auto_refresh = false
+file_format = (format_name = orc_ff)
+;
+
+select * from customer_orc_error;
+select count(*) from  customer_orc_error;   
+
+
+
+-- list files
+list @s3_customer_error;
+
+-- check table count
+select count(*) from customer_orc_error;
+
+-- check the registration
+select * from table(information_schema.external_table_file_registration_history(table_name=>'customer_orc_error'));
+
+-- refresh table via alter statement
+alter external table customer_orc_error refresh;
+
+-- metadata history
+select * from table(information_schema.external_table_file_registration_history(table_name=>'customer_orc_error'));
+
+-- check table count
+select count(*) from customer_orc_error;
+select * from customer_orc_error;
+
+    
+select *
+  from table(information_schema.external_table_file_registration_history(
+    start_time=>dateadd('hour',-1,current_timestamp()),
+    table_name=>'customer_orc_error'));
+
+
+
+
+
+
+ 
