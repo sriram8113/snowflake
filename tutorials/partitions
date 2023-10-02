@@ -1,0 +1,73 @@
+
+    --change the s3 account and url etc.
+    
+    -- lets create external stage in s3
+    drop stage s3_customer_csv_partition;
+    create stage s3_customer_csv_partition 
+        url = 's3://my-s3-data-lake/partition/segment/' 
+        comment = 'this partition data for customer table by market segment';
+
+    -- desc the stage and validate the definition
+    -- and on_error parameters
+    desc stage s3_customer_csv_partition;
+    
+    -- lets list the stage to see all the files and path 
+    list @s3_customer_csv_partition;
+
+
+     -- select external stage using $ notation
+     select t.$1, t.$2, t.$3,t.$4, t.$5, t.$6 , t.$7, t.$8 
+        from 
+     @s3_customer_csv_partition (file_format => 'csv_ff') t; 
+
+    -- check the partition files
+    select metadata$filename from  @s3_customer_csv_partition; 
+
+    select split_part(metadata$filename, '/', 3) from  @s3_customer_csv_partition; 
+     
+    // it will appear null, so be careful with such column.
+     
+    create or replace external TABLE customer_partition_et (
+        partition_col varchar AS  split_part(metadata$filename, '/', 3),
+        CUST_KEY varchar AS (value:c1::varchar),
+        NAME varchar AS (value:c2::varchar),
+        ADDRESS varchar AS (value:c3::varchar),
+        NATION_KEY varchar AS (value:c4::varchar),
+        PHONE varchar AS (value:c5::varchar),
+        ACCOUNT_BALANCE varchar AS (value:c6::varchar),
+        MARKET_SEGMENT varchar AS (value:c7::varchar),
+        COMMENT varchar AS (value:c8::varchar)
+    )
+    partition by (partition_col) 
+    with location=@s3_customer_csv_partition
+    file_format = (format_name = csv_ff)
+    ;
+
+
+
+    create or replace external TABLE customer_no_partition_et (
+        CUST_KEY varchar AS (value:c1::varchar),
+        NAME varchar AS (value:c2::varchar),
+        ADDRESS varchar AS (value:c3::varchar),
+        NATION_KEY varchar AS (value:c4::varchar),
+        PHONE varchar AS (value:c5::varchar),
+        ACCOUNT_BALANCE varchar AS (value:c6::varchar),
+        MARKET_SEGMENT varchar AS (value:c7::varchar),
+        COMMENT varchar AS (value:c8::varchar)
+    )
+    with location=@s3_customer_csv_partition
+    file_format = (format_name = csv_ff)
+    ;
+    -- this updates the metadata
+    alter external table customer_partition_et refresh;
+    alter external table customer_csv_et refresh;
+
+
+
+    -- byte scanned compare & time compare
+    select * from customer_partition_et where partition_col='MACHINERY';
+    select * from customer_csv_et where MARKET_SEGMENT='MACHINERY';
+
+    
+    select * from customer_partition_et where partition_col='FURNITURE';
+    select * from customer_no_partition_et where MARKET_SEGMENT='FURNITURE';
