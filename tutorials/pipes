@@ -1,0 +1,85 @@
+use role accountadmin;
+create database tipsdb;
+use database tipsdb;
+
+create schema tips_schema;
+use schema tips_schema;
+
+use warehouse compute_wh;
+
+alter session set query_tag = 'data pipes';
+
+//=========================================
+
+create or replace table my_customer(
+    cust_key number (38,0),
+    name varchar,
+    address varchar(40),
+    nation_key number(38,0),
+    phone varchar(15),
+    account_balance number(12, 2),
+    market_segment varchar(10),
+    comment varchar(117)
+    
+);
+
+select * from my_customer;
+
+create or replace file format csv_ff type = 'csv'
+    field_optionally_enclosed_by = '\042';
+
+show stages;
+
+create or replace stage stg_pipe
+    file_format = csv_ff
+    comment ='this is my internal stage for pipe';
+
+desc stage stg_pipe;
+
+list @stg_pipe;
+-- or we can use list @stg_pipe/ pattern = '';
+
+-- Copy data from the stage into the table
+COPY INTO my_customer
+FROM @stg_pipe/HISTORY/fourth.csv
+FILE_FORMAT = (
+  TYPE = CSV
+  FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+  SKIP_HEADER = 1  -- If your file has a header row
+  FIELD_DELIMITER = ',' -- If your file uses a different delimiter
+);
+
+select * from my_customer;
+select count(*) from my_customer;
+
+remove @stg_pipe;
+list @stg_pipe;
+
+//=============================
+--creating a pipe object
+
+create or replace pipe my_pipe
+    as 
+        copy into my_customer from @stg_pipe/delta/;
+
+desc pipe my_pipe;
+
+list @stg_pipe/delta/;
+--no data yet 
+
+--to resume the pipe 
+alter pipe my_pipe refresh;
+
+--to know pipe is started 
+select SYSTEM$PIPE_STATUS('my_pipe');
+
+--another function called validate_pipe_load to check the load histiry
+select * from table(validate_pipe_load(
+    pipe_name=>'my_pipe',
+    start_time=>dateadd(hour, -1,current_timestamp())));
+
+list @stg_pipe/delta/;
+
+--so we need to give notification that data is available now to add
+
+ 
