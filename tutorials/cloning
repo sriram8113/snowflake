@@ -1,0 +1,71 @@
+-- Create a temporary table
+CREATE OR REPLACE TEMPORARY TABLE tmp_table (
+  id INT,
+  name STRING
+);
+
+-- Insert data into the temporary table
+INSERT INTO tmp_table VALUES (1, 'John'), (2, 'Alice');
+
+-- Clone the temporary table
+CLONE TEMPORARY TABLE tmp_table TO cloned_tmp_table;
+
+-- Query the cloned temporary table
+SELECT * FROM cloned_tmp_table;
+ //=========================================================
+
+ -- Create a permanent table
+CREATE OR REPLACE TABLE perm_table (
+  id INT,
+  name STRING
+);
+
+-- Insert data into the permanent table
+INSERT INTO perm_table VALUES (1, 'John'), (2, 'Alice');
+
+-- Clone the permanent table
+CREATE OR REPLACE TABLE cloned_perm_table AS
+SELECT *
+FROM perm_table;
+
+-- Query the cloned permanent table
+SELECT * FROM cloned_perm_table;
+
+
+//===========================================================
+
+-- Create a transient table
+CREATE OR REPLACE TRANSIENT TABLE trans_table (
+  id INT,
+  name STRING
+);
+
+-- Insert data into the transient table
+INSERT INTO trans_table VALUES (1, 'John'), (2, 'Alice');
+
+-- Clone the transient table
+CLONE TRANSIENT TABLE trans_table TO cloned_trans_table;
+
+-- Query the cloned transient table
+SELECT * FROM cloned_trans_table;
+
+
+//=============================================================
+
+--permanent table can be cloned to permanent , transient and temporary tables.
+--however transient and temporary cannot be cloned to permanent table
+
+//=========================================================
+
+--cloning doesnt work in case of external tables and internal stages 
+--it works on external stages .
+
+//=========================================================
+
+--pipes cannot be cloned directly however if we clone a schema or databases automatically 
+--pipes are also cloned but we need to resume them again .
+
+--In case of tasks they can be directly cloned but need to again explicity resume them after cloning 
+--similar to the pipes.
+
+--streams can be directly cloned.
