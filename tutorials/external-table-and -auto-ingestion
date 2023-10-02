@@ -1,0 +1,47 @@
+-- create stage
+    drop stage s3_customer_stream;
+    create stage s3_customer_stream 
+        url = 's3://my-s3-data-lake/customer_stream/' 
+        comment = 'this customer csv data with auto-refresh true';
+
+    list @s3_customer_stream;
+
+     -- create external table with auto refresh flag true
+    create or replace external TABLE customer_stream (
+        CUST_KEY varchar AS (value:c1::varchar),
+        NAME varchar AS (value:c2::varchar),
+        ADDRESS varchar AS (value:c3::varchar),
+        NATION_KEY varchar AS (value:c4::varchar),
+        PHONE varchar AS (value:c5::varchar),
+        ACCOUNT_BALANCE varchar AS (value:c6::varchar),
+        MARKET_SEGMENT varchar AS (value:c7::varchar),
+        COMMENT varchar AS (value:c8::varchar)
+    )
+    with location=@s3_customer_stream
+    auto_refresh = true
+    file_format = (format_name = csv_ff)
+;
+
+
+    -- check how many records we hae
+    select count(*) from customer_stream; -- ? records
+
+    -- check the history function
+    select * from table(information_schema.EXTERNAL_TABLE_FILES(table_name=>'customer_stream'));
+
+    -- add 5 more files 
+        
+            -- check file count within stage
+            list @s3_customer_stream;
+            
+            -- add more files & check list
+            list @s3_customer_stream;
+            
+            -- check record count
+            select count(*) from customer_stream; -- ? record
+
+            -- run this 
+            alter external table customer_stream refresh;
+
+            -- now records will be added
+            select count(*) from customer_stream; 
