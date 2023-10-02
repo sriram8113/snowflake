@@ -1,0 +1,449 @@
+--Time travel and fail safe periods.
+
+--time travel for standard account is one day(data retention period).
+--for enterprise edition it is 1 to 90 days.
+--fail safe period is 7 days that is stored by snowflake in order to get that we need to
+--contact the support of snowflake (this is for only the permanent tables).
+
+
+--in case of temporary or transient tables this period is only 24hrs.(time travel)does not depend on the edition .
+--In case of the temporary and transient tables fail safe period is 0.
+
+
+
+-- Create a sample table
+CREATE OR REPLACE TABLE my_table (
+  id INT,
+  name STRING
+);
+
+-- Insert sample data
+INSERT INTO my_table VALUES (1, 'John'), (2, 'Alice'), (3, 'Bob');
+
+-- Query data as of a specific timestamp
+SELECT *
+FROM my_table
+AS OF TIMESTAMP '2023-09-15 12:00:00';
+
+-- Query data as of a specific statement ID
+SELECT *
+FROM my_table
+AS OF STATEMENT_ID '7xfia8b17e32001236';
+
+-- Query data as of the latest commit, with a 5-minute offset
+SELECT *
+FROM my_table
+AS OF SYSTEM TIME -5;
+
+-- Create a new version
+CREATE OR REPLACE TABLE my_table_v2 AS (
+  SELECT * FROM my_table
+);
+
+-- Query data in a specific version
+SELECT *
+FROM my_table_v2
+VERSION @my_version; -- Use the version name or number
+
+-- Join data from two different points in time
+SELECT *
+FROM my_table AS OF TIMESTAMP '2023-09-15 12:00:00' t1
+JOIN my_table AS OF TIMESTAMP '2023-09-14 10:00:00' t2
+ON t1.id = t2.id;
+
+
+//=====================================================================
+
+--Remember to use these statements with caution, especially the DROP statement, as it permanently deletes objects.
+--The ability to undrop objects depends on your Snowflake account settings and the retention policies configured for your account.
+
+
+//=====================================================================
+//lets create a table 
+    create or replace table tt_3_days (
+        o_orderkey number(38,0),
+        o_custkey number(38,0),
+        o_orderstatus varchar(1),
+        o_totalprice number(12,2),
+        o_orderdate date,
+        o_orderpriority varchar(15),
+        o_clerk varchar(15),
+        o_shippriority number(38,0),
+        o_comment varchar(79)
+    )
+    data_retention_time_in_days=3
+    ;
+    
+    -- desc table does not show time travel period
+    desc table tt_3_days;    
+    
+    -- to see the retention period, you have to use show tables sql
+    show tables like 'tt_3_days';
+    
+    -- alternatively, you can see it via information schema
+    select * from "TIPSDB"."INFORMATION_SCHEMA"."TABLES"
+    where table_name = 'TT_3_DAYS';
+    
+    -- load data from a sample data set
+    insert into tt_3_days select * from SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.ORDERS limit 1000000; 
+    
+    -- check the data
+    select count(*) from tt_3_days;
+    
+    -- see first few records
+    select *  from tt_3_days limit 10;
+    
+    -- lets change few order key and change the status from High to Urgent
+    select * from tt_3_days;
+    
+        -- select min/max of order key and how order key looks like 
+        select min(O_ORDERKEY), max(O_ORDERKEY)  from tt_3_days;
+        select O_ORDERKEY from tt_3_days order by O_ORDERKEY;
+        
+        -- lets update with order key small than a number
+        update tt_3_days set O_ORDERPRIORITY = '1-URGENT' where O_ORDERKEY < 100000 and O_ORDERPRIORITY <> '1-URGENT';
+        
+        
+        -- lets update some other fields
+        update t1_3_days set O_ORDERPRIORITY = '1-URGENT' where O_ORDERKEY < 100000 and O_ORDERPRIORITY <> '1-URGENT';
+
+        -- now lets drop the same records
+        delete from tt_3_days where O_ORDERKEY < 100000 and O_ORDERPRIORITY = '1-URGENT';
+        
+        select count(*) from tt_3_days; -- 999946
+        
+        -- so what are the table size before this stmt
+        select count(*) from tt_3_days before(statement => '01a151b8-0000-6427-0001-3cfe0001ab96');
+        
+        -- extended time travel SQL
+        select count(*) from tt_3_days at(statement => '01a151b8-0000-6427-0001-3cfe0001ab96');
+        
+        -- minus operation
+        select * from tt_3_days before(statement => '01a151b8-0000-6427-0001-3cfe0001ab96')
+        minus
+        select * from tt_3_days;
+        
+        -- not exist query approach
+        select * from tt_3_days before(statement => '01a151b8-0000-6427-0001-3cfe0001ab96') tt_past
+        where not exists 
+        (select 1
+                  from tt_3_days tt_now
+                  where tt_past.O_ORDERKEY = tt_now.O_ORDERKEY);
+        
+
+        -- you can also use offset key word
+        
+        -- The following query selects historical data from a table as of 300sec ago:
+        select count(*) from tt_3_days at(offset => -60);
+        
+        -- The following query selects historical data from a table as of the date and time represented by the specified timestamp:
+        select count(*) from tt_3_days at(timestamp => 'Mon, 20 Dec 2021 07:51:03.389 -0800'::timestamp_tz); -- 100000
+        select count(*) from tt_3_days at(timestamp => 'Mon, 20 Dec 2021 07:59:03.389 -0800'::timestamp_tz); -- 999981
+        
+        
+        -- altering the table to change the retention period
+        --chaing value from 3 to 5 days
+        alter table tt_3_days 
+            set data_retention_time_in_days=5;
+        
+        -- lets validate
+        show tables like 'tt_3_days';
+            
+        -- the retention period can also be changed from 5 to 2 days
+        alter table tt_3_days 
+            set data_retention_time_in_days=2;
+            
+       -- lets validate
+       show tables like 'tt_3_days';
+       
+       -- decreasing the retention period will lead to data loss
+       -- any changes done during that period will not appear.
+        
+        
+
+    /* -----------------------------------------    
+    Lets create a transient and temp table and see how it works
+    */
+
+    //following will work as we are not having any retention period
+    create or replace transient table tt_0_days_tr (
+        o_orderkey number(38,0),
+        o_custkey number(38,0),
+        o_orderstatus varchar(1),
+        o_totalprice number(12,2),
+        o_orderdate date,
+        o_orderpriority varchar(15),
+        o_clerk varchar(15),
+        o_shippriority number(38,0),
+        o_comment varchar(79)
+    )
+    data_retention_time_in_days=0
+    ;
+    
+    //following will work as we are not having only 1 day of retention period
+    create or replace transient table tt_1_days_tr (
+        o_orderkey number(38,0),
+        o_custkey number(38,0),
+        o_orderstatus varchar(1),
+        o_totalprice number(12,2),
+        o_orderdate date,
+        o_orderpriority varchar(15),
+        o_clerk varchar(15),
+        o_shippriority number(38,0),
+        o_comment varchar(79)
+    )
+    data_retention_time_in_days=1
+    ;
+    
+    //following will fail as retention period for more than 1 day is not supported. 
+    create or replace transient table tt_2_days_tr (
+        o_orderkey number(38,0),
+        o_custkey number(38,0),
+        o_orderstatus varchar(1),
+        o_totalprice number(12,2),
+        o_orderdate date,
+        o_orderpriority varchar(15),
+        o_clerk varchar(15),
+        o_shippriority number(38,0),
+        o_comment varchar(79)
+    )
+    data_retention_time_in_days=2
+    ;
+    
+    //same is applicable for temp table
+
+    create or replace temporary table tt_2_days_tmp (
+        o_orderkey number(38,0),
+        o_custkey number(38,0),
+        o_orderstatus varchar(1),
+        o_totalprice number(12,2),
+        o_orderdate date,
+        o_orderpriority varchar(15),
+        o_clerk varchar(15),
+        o_shippriority number(38,0),
+        o_comment varchar(79)
+    )
+    data_retention_time_in_days=2
+    ;
+    
+    //but stragenly snowflake does not throw any error, 
+    //so should we assume that it has considered this value
+    
+    //lets check the show table command
+    show tables like 'tt_2_days_tmp';
+    
+    //what if we define a permanent table with 100 days of retent period
+    create or replace table tt_100_days (
+        o_orderkey number(38,0),
+        o_custkey number(38,0),
+        o_orderstatus varchar(1),
+        o_totalprice number(12,2),
+        o_orderdate date,
+        o_orderpriority varchar(15),
+        o_clerk varchar(15),
+        o_shippriority number(38,0),
+        o_comment varchar(79)
+    )
+    data_retention_time_in_days=100
+    ;
+    
+    // it ends with error
+    //SQL compilation error: Exceeds maximum allowable retention time (90).
+
+//==========================================================================================
+
+--drop and undrop
+
+// table with 3 days retention
+    create or replace table time_travel_undrop_y (
+        o_orderkey number(38,0),
+        o_custkey number(38,0),
+        o_orderstatus varchar(1),
+        o_totalprice number(12,2),
+        o_orderdate date,
+        o_orderpriority varchar(15),
+        o_clerk varchar(15),
+        o_shippriority number(38,0),
+        o_comment varchar(79)
+    )
+    data_retention_time_in_days=0
+    ;
+    show tables like 'time_travel_undrop_y';
+    
+    
+
+    insert into time_travel_undrop_y select * from SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.ORDERS limit 100; 
+    
+    select * from time_travel_undrop_y;
+    
+    -- Lets drop this table 
+    drop table time_travel_undrop_y;
+    
+    -- now table is dropped, lets query it and snowflake will say "object does not exist"
+    select * from time_travel_undrop_y;
+    
+    --so lets use the undrop feature
+    undrop table time_travel_undrop_y;
+    
+    -- now I can query it again;
+    select * from time_travel_undrop_x;
+    
+    
+    /* 
+    ===============================================
+    Lets try it with database and schema level objects
+    ===============================================
+    */
+    
+        -- Chagne role
+        use role sysadmin;
+        
+        -- create a table 
+        create or replace database tt_db_undrop;
+        create or replace schema tt_schema_undrop;
+        create or replace table tt_undrop (field1 varchar());
+        insert into tt_undrop (field1) values ('a'),('b'),('c'),('d'),('e');
+        
+        -- I have not used any time travel period and it has take default period (which is equal to 1)
+        
+        -- now lets show all these objects one by one
+        
+        show databases like 'tt%';
+        -- the retention period is 1 day (the default value)
+        -- and this can be changed to a new value using parameter data_retention_time_in_days=3
+        
+        show schemas like 'tt%';
+        -- the retention period is 1 day (the default value)
+        -- and this can be changed to a new value using parameter data_retention_time_in_days=3
+        
+        show tables like 'tt%';
+        -- the retention period is 1 day (the default value)
+        -- and this can be changed to a new value using parameter data_retention_time_in_days=3
+        
+        -- now select from table and see result
+        select * from tt_undrop;
+        
+        -- now lets drop the databse itself
+        drop database tt_db_undrop;
+        
+        -- show does not bring any result as object no more exist
+        show databases like 'tt%';
+        
+        undrop database tt_db_undrop;
+        -- if you rerun, it says it already exist.
+        
+        
+        -- now lets drop the schema
+        drop schema tt_db_undrop.tt_schema_undrop;
+        show schemas like 'tt%';
+        
+        undrop schema tt_db_undrop.tt_schema_undrop;
+        
+        -- so this is how it works.
+        select * from tt_db_undrop.tt_schema_undrop.tt_undrop;
+//=======================================================================================
+
+--time travel and cloning .
+
+//lets create a base table
+    create or replace table tt_before_clone (
+        o_orderkey number(38,0),
+        o_custkey number(38,0),
+        o_orderstatus varchar(1),
+        o_totalprice number(12,2),
+        o_orderdate date,
+        o_orderpriority varchar(15),
+        o_clerk varchar(15),
+        o_shippriority number(38,0),
+        o_comment varchar(79)
+    )
+    data_retention_time_in_days=3
+    ;
+    
+    -- insert 100 records
+    insert into tt_before_clone select * from SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.ORDERS limit 100; 
+    -- 
+    
+    -- lets see how this table looks like 
+    select * from tt_before_clone;
+    
+    -- lets perform some delete/update & insert statements
+    
+    delete from tt_before_clone where O_ORDERPRIORITY = '5-LOW'; -- 01a151d1-0000-6425-0001-3cfe00019dda
+    select * from tt_before_clone; -- 77b rows (23 records deleted)
+    
+    -- lets update few records
+    update tt_before_clone set O_ORDERSTATUS = 'X' where O_ORDERPRIORITY='3-MEDIUM'; -- 01a151d2-0000-6427-0001-3cfe0001ae3e
+    select * from tt_before_clone; -- 77 rows, 20 records updated
+    
+    -- lets insert 50 records
+    insert into tt_before_clone select * from SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.ORDERS where O_ORDERPRIORITY = '5-LOW' limit 50;  
+    -- 01a151d2-0000-6425-0001-3cfe00019e5a
+    
+    select * from tt_before_clone; -- 127 rows
+
+    -- we can use clone feature to create a back or snapshot 
+    create or replace table tt_after_clone clone tt_before_clone before (statement => '01a151d2-0000-6425-0001-3cfe00019e5a');
+    
+    -- the retention period is also cloned
+    show tables like 'tt%clone%';
+    
+    select count(*) from tt_before_clone; -- 127
+    select count(*) from tt_after_clone; -- 77
+    
+    -- time travel data is not available to the cloned table 
+    select * from tt_before_clone before (statement => '01a1erd1-0000-6425-0001-3cfe01219dda'); -- should return 100 rows
+    select * from tt_after_clone before (statement => '01a123d1-0000-6425-0001-3cfe12319dda'); -- this statemetn fails
+    
+    -- Nothing is preserved
+    show tables like 'tt%clone%'; 
+    select * from tt_after_clone before (offset => -900); -- this statemetn fails
+    
+    -- When you clone a db or schema, the time period really matters here
+    -- if your data retention periods are different for differt objects, then clone may fail.
+    
+ //=====================================================================================================
+
+ --time travel and create table
+     -- we can create a table using before or at SQL extended keyword
+    create table tt_as_select 
+        as select * from tt_before_clone before(statement => '01a151d1-0000-6425-0001-3cfe00019dda');
+        
+        select * from tt_as_select;
+
+//========================================================================================================
+
+-- storage cost.
+
+//set the context    
+    use role accountadmin;
+    
+    -- table usage metrics show the table usage
+    -- and pay attention to fail safe & time travel bytes columns.
+    select * from "SNOWFLAKE"."ACCOUNT_USAGE"."TABLE_STORAGE_METRICS" 
+    where table_schema ='CH14' and table_name in ('TT_AFTER_CLONE','TT_AS_SELECT')
+    and table_dropped is null
+    limit 10;
+    
+    --how to calculate the time travel cost vs table storage cost
+    --lets assume that we are paying 40$ per TB per month
+    
+    select table_schema, 
+        sum(ACTIVE_BYTES)/(1024*1024*1024*1024)  as "Active(Tb)", 
+        sum(TIME_TRAVEL_BYTES)/(1024*1024*1024*1024) as "TT(Tb)", 
+        sum(FAILSAFE_BYTES)/(1024*1024*1024*1024) as  "FF(Tb)",
+        ((sum(ACTIVE_BYTES)+sum(TIME_TRAVEL_BYTES)+sum(FAILSAFE_BYTES))/(1024*1024*1024*1024))*(40/30) as "Cost Per Day ($)"
+    from 
+    "SNOWFLAKE"."ACCOUNT_USAGE"."TABLE_STORAGE_METRICS" 
+    where table_schema ='CH14'
+    group by table_schema;
+    
+    -- for all my schemas
+    select table_schema, 
+        sum(ACTIVE_BYTES)/(1024*1024*1024*1024)  as "Active(Tb)", 
+        sum(TIME_TRAVEL_BYTES)/(1024*1024*1024*1024) as "TT(Tb)", 
+        sum(FAILSAFE_BYTES)/(1024*1024*1024*1024) as  "FF(Tb)",
+        ((sum(ACTIVE_BYTES)+sum(TIME_TRAVEL_BYTES)+sum(FAILSAFE_BYTES))/(1024*1024*1024*1024))*(40/30) as "Cost Per Day ($)"
+    from 
+    "SNOWFLAKE"."ACCOUNT_USAGE"."TABLE_STORAGE_METRICS" 
+    group by table_schema;
