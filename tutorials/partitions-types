@@ -1,0 +1,44 @@
+-- Create a table with automatic partitioning
+CREATE OR REPLACE TABLE auto_partitioned_table (
+  date_column DATE,
+  customer_id NUMBER,
+  sales_amount NUMBER
+)
+AUTO_COMPRESS = TRUE  -- Enable automatic compression
+PARTITION BY (date_column);  -- Automatic partitioning by date_column
+
+
+
+-- Create a table with user-defined range partitioning
+CREATE OR REPLACE TABLE range_partitioned_table (
+  date_column DATE,
+  customer_id NUMBER,
+  sales_amount NUMBER
+)
+PARTITION BY (
+  RANGE_BUCKET(date_column, 
+    TO_DATE('2023-01-01')::DATE,
+    TO_DATE('2023-12-31')::DATE,
+    INTERVAL '1 MONTH')
+);
+
+
+
+
+-- Create a table with list partitioning
+CREATE OR REPLACE TABLE list_partitioned_table (
+  state STRING,
+  customer_id NUMBER,
+  sales_amount NUMBER
+)
+PARTITION BY (
+  state IN ('CA', 'NY', 'TX', 'FL', 'IL', 'Other')
+);
+
+
+
+--we can also set to auto partitioning if user defined partions are not good by using alter 
+
+ALTER TABLE table_name 
+REORGANIZE PARTITIONS INTO AUTO;
+
