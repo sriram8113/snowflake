@@ -1,0 +1,174 @@
+//-shows all the file in the staging area
+list @~;
+
+list @%customer;
+
+//above first one shows user stages second shows the table storage . first one tilda sign second one is percentage sign
+
+show stages;
+list @MY_STG;
+
+// Here no need of any signs 
+
+create stage my_db_objects.my_schema_objects.stg02 comment = 'This is my second stage';
+
+show stages;
+show stages like '%02';
+list @stg02;
+
+list @~;
+
+--PUT file:///C:/Users/Sriram/Downloads/shelter1000_new.csv @~/stg02; use this in sql cli editor not here
+
+
+list @~/stg02;
+
+//for removing the stages 
+remove @~/name;
+
+-- we can add any type of file html or other types also ..
+
+--below is similar to using like here we use pattern 
+list @~ pattern ='.*.gz';
+
+//====================================================
+--till now we added from user stages no we will see table stages 
+
+--instead of tilda ~ sign we use percentage sign here 
+--PUT file:///C:/Users/Sriram/Downloads/shelter1000_new.csv @%customer_csv/stg02/;
+
+list @%customer_csv;
+list @%customer_csv/my_schema_objects/;
+list @%customer_csv/ pattern ='.*.gz';
+
+//==========================================================
+--till now we have examples of unnamed stages noe we will see examples of named stages
+
+--since stages are temp storage , they need to be removed.
+--after the files are moved to permanent location
+
+remove @~/my_schema_objcets/;
+remove @%customer_csv/my_schema_objects/;
+
+remove @%customer_csv;
+
+
+--remove is not same as drop 
+--if u drop a tabel all the files in the staging stage will also be removed 
+
+
+drop stage @%customer_csv;
+
+drop stage stg02;
+
+//===================================
+--similarly we use the same for external stages 
+--put command is not applicable for external stages 
+//================================
+
+--you cannot load data to external stages
+
+//==================================
+
+create table table_name( my_data variant);
+STAGE_FILE_FORMAT = (TYPE = PARQUET);
+
+--loading data
+--put file:///path/filename @%stage/;
+
+--query data using $notation
+
+select 
+    metadata$filename,
+    metadata$file_row_number,
+    $1:col1:varchar,
+    $1:col2:varchar
+    from tablename ;
+
+copy into table_name 
+    from @stagenme
+    force= true;
+
+//=========================
+
+select * from "SNOWFLAKE"."ACCOUNT_USAGE"."COPY_HISTORY";
+
+select * from "SNOWFLAKE"."ACCOUNT_USAGE"."LOAD_HISTORY";
+
+select * from "SNOWFLAKE"."ACCOUNT_USAGE"."STAGES";
+
+//==========================================
+
+-- Copy data from a stage into a table
+COPY INTO your_target_table
+FROM @your_stage_name/your_file_prefix
+FILES = ('file1.csv', 'file2.csv')
+FILE_FORMAT = (TYPE = CSV);
+
+here we can give pattern also 
+
+your_target_table: Replace this with the name of the target table where you want to load the data.
+your_stage_name: Replace this with the name of the Snowflake stage from which you want to copy data.
+your_file_prefix: If your files in the stage have a common prefix, specify it here.
+('file1.csv', 'file2.csv'): Specify the list of file names in the stage that you want to copy into the table. You can load multiple files at once.
+FILE_FORMAT = (TYPE = CSV): This part specifies the file format of the data in the stage. Make sure to adjust the file format options based on the actual format of your data.
+
+//==========================================
+-- Step 1: Create an External Stage
+CREATE OR REPLACE STAGE my_external_stage
+URL = 's3://your-s3-bucket/path/'
+CREDENTIALS = (
+  AWS_KEY_ID = 'your_aws_access_key_id',
+  AWS_SECRET_KEY = 'your_aws_secret_access_key'
+);
+
+-- Step 2: Upload Data into the External Stage
+PUT file:///local/path/to/data.csv @my_external_stage;
+
+-- Step 3: Create a Snowflake Table
+CREATE OR REPLACE TABLE my_target_table (
+  column1 STRING,
+  column2 NUMBER,
+  column3 DATE
+);
+
+-- Step 4: Copy Data from Stage to Table
+COPY INTO my_target_table
+FROM @my_external_stage/data.csv
+FILE_FORMAT = (TYPE = CSV);
+
+-- Optional: Step 5: Remove the External Stage (use with caution)
+-- DROP STAGE my_external_stage;
+//=======================================================
+
+-- Using a 4-node warehouse with no compression
+USE WAREHOUSE medium_warehouse;
+
+-- Load data without compression
+COPY INTO my_target_table
+FROM @my_stage/data.csv
+FILE_FORMAT = (TYPE = CSV);
+
+
+-- Using an 8-node warehouse with standard compression
+USE WAREHOUSE large_warehouse;
+
+-- Load data with standard compression
+COPY INTO my_target_table
+FROM @my_stage/data.csv
+FILE_FORMAT = (TYPE = CSV)
+OVERWRITE = TRUE  -- Overwrite existing data, if any
+COMPRESSION = 'AUTO';  -- Use standard compression
+
+
+-- Using a 16-node warehouse with no compression
+USE WAREHOUSE xlarge_warehouse;
+
+-- Load data without compression
+COPY INTO my_target_table
+FROM @my_stage/data.csv
+FILE_FORMAT = (TYPE = CSV);
+
+
+
+
